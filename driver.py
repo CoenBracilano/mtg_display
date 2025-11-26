@@ -1,10 +1,13 @@
 import cv2
 from card_detection import CardDetector, draw_detections
+from tracker import IDTracker, draw_tracks
 
 def main():
     # our capturing object, the video feed
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(r"C:\Users\cpbsw\mtg_display\mtg_test_video.mp4")
     detector = CardDetector()
+    tracker = IDTracker(max_disapeared=200, max_distance=80)
+
 
     if not cap.isOpened():
         print("error couldnt open")
@@ -18,7 +21,9 @@ def main():
             break
         
         detections = detector.detect(frame)
-        vis = draw_detections(frame, detections)
+        tracks = tracker.update(detections)
+        vis = draw_tracks(frame, tracks)
+
 
         cv2.imshow("detections", vis)
         if cv2.waitKey(1) == ord('q'):
