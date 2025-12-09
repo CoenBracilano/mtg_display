@@ -1,8 +1,6 @@
 import easyocr
 import cv2
 import argparse
-import platform
-from card_detection import CardDetector, extract_card
 
 #WIP, currently just runs OCR on a card, needs to be zoomed in enough to be able to read the text though
 #need to add logic to figure out what is the name of the card and what is just extra text. 

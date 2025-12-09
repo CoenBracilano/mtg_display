@@ -25,7 +25,6 @@ def main(source):
         tracks = tracker.update(detections)
         vis = draw_tracks(frame, tracks)
 
-
         cv2.imshow("detections", vis)
         if cv2.waitKey(1) == ord('q'):
             break
