@@ -1,7 +1,9 @@
 import cv2
+import numpy as np
+import os
 
 class CardDetector:
-    def __init__(self, min_area=2000, max_area= 200000, epsilon_factor = 0.02) :
+    def __init__(self, min_area=1000, max_area= 200000, epsilon_factor = 0.02) :
         self.min_area = min_area
         self.max_area = max_area
         self.epsilon_factor = epsilon_factor
@@ -51,11 +53,11 @@ class CardDetector:
             # find the center of the card
             cx = x+w / 2.0
             cy = y+h / 2.0
-            #store
+            # store
             detections.append({
                 "bbox": (x,y,w,h),
                 "centroid": (cx, cy),
-                "contor": (approx)
+                "contour": (approx)
             })
         
         return detections
@@ -70,3 +72,42 @@ def draw_detections(frame, detections):
         cv2.rectangle(out, (x,y), (x+w, y+h), (0,255,0), 2)
         cv2.circle(out, (int(cx), int(cy)), 3, (0, 0, 255), -1)
     return out
+
+# Warps any detected cards for easier feature matching
+# Saves warped cards to ../detected_cards/ for debugging
+def warp_and_save(frame, detections, idx=0, width=300, height=420):
+    if os.path.exists("../detected_cards"):
+        for filename in os.listdir("../detected_cards"):
+            file_path = os.path.join("../detected_cards", filename)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+        os.rmdir("../detected_cards")
+    os.makedirs("../detected_cards")
+
+    warped_cards = []
+    for idx, detection in enumerate(detections):
+        pts = detection["contour"].reshape(4, 2)
+        pts = order_points(pts)
+
+        dst = np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], dtype="float32")
+        M = cv2.getPerspectiveTransform(pts.astype("float32"), dst)
+        warped = cv2.warpPerspective(frame, M, (width, height))
+        warped_cards.append(warped)
+
+        cv2.imwrite(f"../detected_cards/card_{idx+1}.jpg", warped)            
+
+    return warped_cards
+
+# Helper function to order points for perspective transform
+def order_points(pts):
+        rect = np.zeros((4, 2), dtype="float32")
+
+        s = np.sum(pts, axis=1)
+        rect[0] = pts[np.argmin(s)]
+        rect[2] = pts[np.argmax(s)]
+
+        diff = np.diff(pts, axis=1)
+        rect[1] = pts[np.argmin(diff)]
+        rect[3] = pts[np.argmax(diff)]
+
+        return rect
