@@ -6,7 +6,7 @@ import requests
 import json
 from card_detection import CardDetector, warp_and_save
 
-class CV2CardMatcher:
+class CardMatcher:
     def __init__(self):
         self.db_path = "../card_database"
         if not os.path.exists(self.db_path):
@@ -189,7 +189,7 @@ if __name__ == "__main__":
     parser.add_argument("--image", type=str, default="../test_files/mtgcards.webp")
     args = parser.parse_args()
 
-    matcher = CV2CardMatcher()
+    matcher = CardMatcher()
     matcher.populate(args.card_list)
  
     results = matcher.identify_all_cards(args.image)
