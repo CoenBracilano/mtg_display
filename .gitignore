@@ -206,11 +206,13 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# MTG card database for testing/training
+# MTG card database
 card_database/
+
+# YOLO training stuff
 yolo_training/mtg_yolo/
 yolo_training/runs/
-
+yolo_training/mtg_train_gpu_*/
 
 # Detected cards output folder (for debugging)
 detected_cards/

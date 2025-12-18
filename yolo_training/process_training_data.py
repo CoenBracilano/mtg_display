@@ -1,202 +1,143 @@
-from datasets import load_dataset
-from pathlib import Path
+import io
+import os
 import numpy as np
 from PIL import Image
-import io
+from pathlib import Path
+from datasets import load_dataset
 
-# Load dataset
-print("Loading dataset from Hugging Face...")
-dataset = load_dataset("gabraken/mtg-detection")
+# --- CONFIGURATION ---
+TRAIN_COUNT = 5000
+VAL_COUNT = 1500
+BASE_DIR = Path("mtg_yolo")
 
-# Create YOLO directory structure
-base_path = Path("mtg_yolo")
-for split in ['train', 'val']:
-    (base_path / 'images' / split).mkdir(parents=True, exist_ok=True)
-    (base_path / 'labels' / split).mkdir(parents=True, exist_ok=True)
-
-def find_next_corner(current_corner, all_corners, visited):
-    """Find the next corner by following the angle vector"""
-    # current_corner format: [x, y, visible, angle, corner_id]
-    curr_x, curr_y, _, angle, _ = current_corner
-    
-    # Direction vector from angle
-    dx = np.cos(angle)
-    dy = np.sin(angle)
-    
-    best_match = None
-    best_score = float('inf')
-    
-    for idx, corner in enumerate(all_corners):
-        if idx in visited:
-            continue
-        
-        # corner format: [x, y, visible, angle, corner_id]
-        to_x = corner[0] - curr_x
-        to_y = corner[1] - curr_y
-        
-        # Distance
-        dist = np.sqrt(to_x**2 + to_y**2)
-        if dist < 0.01:  # Too close
-            continue
-        
-        # Normalize
-        to_x /= dist
-        to_y /= dist
-        
-        # Check alignment with angle direction
-        alignment = dx * to_x + dy * to_y
-        
-        # Score: prefer aligned and close corners
-        score = dist * (2 - alignment)
-        
-        if alignment > 0.5 and score < best_score:
-            best_score = score
-            best_match = {'corner': corner, 'idx': idx}
-    
-    return best_match
-
-def group_corners_by_card(corners):
-    """Group corners into cards by following the angle chain"""
-    if not corners:
-        return []
-    
-    visited = set()
+def group_corners_by_card(annotations):
+    """
+    Groups corners into cards using the Corner ID (index 4).
+    Expects format: [x, y, visible, angle, corner_id]
+    """
     cards = []
+    current_card = {}
     
-    for start_idx, start_corner in enumerate(corners):
-        if start_idx in visited:
-            continue
+    for corner in annotations:
+        # corner[4] is the corner_id (0: TL, 1: TR, 2: BR, 3: BL)
+        cid = int(corner[4])
         
-        # Start a new card
-        card_corners = [start_corner]
-        visited.add(start_idx)
-        current = start_corner
-        
-        # Follow the angle chain to find next 3 corners
-        for _ in range(3):
-            next_corner = find_next_corner(current, corners, visited)
-            if next_corner is None:
-                break
+        # If we see a 0, we start a new card tracking attempt
+        if cid == 0:
+            current_card = {0: corner}
+        # Only add corners 1, 2, 3 if they belong to the current sequence
+        elif cid in [1, 2, 3] and (cid - 1) in current_card:
+            current_card[cid] = corner
             
-            card_corners.append(next_corner['corner'])
-            visited.add(next_corner['idx'])
-            current = next_corner['corner']
-        
-        # Valid card has 4 corners
-        if len(card_corners) == 4:
-            cards.append(card_corners)
-    
+        # Once we have 4 corners in order, we have a valid card
+        if len(current_card) == 4:
+            cards.append([current_card[0], current_card[1], current_card[2], current_card[3]])
+            current_card = {} # Reset for next card
+            
     return cards
 
 def corners_to_bbox(card_corners):
-    """Convert 4 corners to YOLO bbox format (full extent)"""
-    # card_corners format: list of [x, y, visible, angle, corner_id]
+    """
+    Calculates YOLO center-normalized bbox.
+    Clamps coordinates > 1.0 to the image edge.
+    """
+    # 1. Check visibility (index 2 is the visibility flag)
+    visible_count = sum(1 for c in card_corners if c[2] > 0.5)
     
-    # Check visibility - need at least 2 visible corners
-    visible_count = sum(1 for corner in card_corners if corner[2] > 0.5)
-    if visible_count < 2:
+    # NEW: Ignore cards that are too hidden (1 or 0 corners visible)
+    if visible_count <= 1:
         return None
+
+    # 2. Extract X (index 0) and Y (index 1)
+    xs = [c[0] for c in card_corners]
+    ys = [c[1] for c in card_corners]
+
+    # 3. Clamp coordinates to the visible image area [0, 1]
+    # This ensures the box stays within the frame even if the card is partially off-screen
+    clean_xs = [max(0.0, min(1.0, x)) for x in xs]
+    clean_ys = [max(0.0, min(1.0, y)) for y in ys]
+
+    min_x, max_x = min(clean_xs), max(clean_xs)
+    min_y, max_y = min(clean_ys), max(clean_ys)
+
+    width = max_x - min_x
+    height = max_y - min_y
     
-    # Extract all coordinates (clip to 0-1 range for visible area)
-    coords = []
-    for corner in card_corners:
-        x, y = corner[0], corner[1]
-        # Clip coordinates to image bounds [0, 1]
-        x = max(0.0, min(1.0, x))
-        y = max(0.0, min(1.0, y))
-        coords.append((x, y))
-    
-    xs = [c[0] for c in coords]
-    ys = [c[1] for c in coords]
-    
-    x_center = (min(xs) + max(xs)) / 2
-    y_center = (min(ys) + max(ys)) / 2
-    width = max(xs) - min(xs)
-    height = max(ys) - min(ys)
-    
-    # Sanity checks
-    if width < 0.05 or height < 0.05:  # Too small
+    # Final sanity check for size
+    if width < 0.005 or height < 0.005:
         return None
-    if width > 0.95 or height > 0.95:  # Suspiciously large
-        return None
-    
+
+    x_center = min_x + (width / 2)
+    y_center = min_y + (height / 2)
+
     return [x_center, y_center, width, height]
 
-def process_split(dataset_split, split_name):
-    """Process train or test split"""
-    print(f"\nProcessing {split_name} split ({len(dataset_split)} images)...")
+def process_split(stream, split_name):
+    print(f"\n🚀 Processing {split_name} split...")
     
-    for idx, sample in enumerate(dataset_split):
-        if idx % 1000 == 0:
-            print(f"  Progress: {idx}/{len(dataset_split)} images...")
+    for idx, sample in enumerate(stream):
+        if idx % 100 == 0:
+            print(f"   Progress: {idx} images saved...")
+
+        # 1. Image Loading (Streaming Fix)
+        try:
+            raw_img = sample['image']
+            if isinstance(raw_img, dict) and 'bytes' in raw_img:
+                image = Image.open(io.BytesIO(raw_img['bytes']))
+            elif isinstance(raw_img, bytes):
+                image = Image.open(io.BytesIO(raw_img))
+            else:
+                image = raw_img # PIL object
+            
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+        except Exception as e:
+            print(f"   ⚠️ Skipping img_{idx}: {e}")
+            continue
+
+        # Save Image (Native Res, Quality 85 for space)
+        img_filename = f"img_{idx:06d}.jpg"
+        img_path = BASE_DIR / 'images' / split_name / img_filename
+        image.save(img_path, "JPEG", quality=85, optimize=True)
+
+        # 2. Annotation Processing
+        # annotations is a list of [x, y, visible, angle, corner_id]
+        annotations = sample['annotation']
+        cards = group_corners_by_card(annotations)
         
-        # Convert bytes to PIL Image
-        image_data = sample['image']
-        
-        if isinstance(image_data, bytes):
-            image = Image.open(io.BytesIO(image_data))
-        elif isinstance(image_data, dict) and 'bytes' in image_data:
-            image = Image.open(io.BytesIO(image_data['bytes']))
-        else:
-            image = image_data
-        
-        # Convert to PIL if needed
-        if not isinstance(image, Image.Image):
-            image = Image.fromarray(np.array(image))
-        
-        # Convert RGBA to RGB (fix for JPEG)
-        if image.mode == 'RGBA':
-            rgb_image = Image.new('RGB', image.size, (255, 255, 255))
-            rgb_image.paste(image, mask=image.split()[3])
-            image = rgb_image
-        elif image.mode != 'RGB':
-            image = image.convert('RGB')
-        
-        # Save image
-        img_path = base_path / 'images' / split_name / f'img_{idx:06d}.jpg'
-        image.save(img_path)
-        
-        # Process corners
-        corners = sample['annotation']
-        
-        # Group corners into cards
-        cards = group_corners_by_card(corners)
-        
-        # Convert to YOLO bboxes
         labels = []
         for card_corners in cards:
             bbox = corners_to_bbox(card_corners)
             if bbox:
+                # Format to 6 decimal places for YOLO precision
                 labels.append(f"0 {bbox[0]:.6f} {bbox[1]:.6f} {bbox[2]:.6f} {bbox[3]:.6f}")
-        
-        # Save labels
-        label_path = base_path / 'labels' / split_name / f'img_{idx:06d}.txt'
+
+        # Save Label File
+        label_filename = f"img_{idx:06d}.txt"
+        label_path = BASE_DIR / 'labels' / split_name / label_filename
         with open(label_path, 'w') as f:
             f.write('\n'.join(labels))
-    
-    print(f"  ✓ Completed {split_name}: {len(dataset_split)} images processed")
 
-# Process both splits
-process_split(dataset['train'], 'train')
-process_split(dataset['test'], 'val')
+def main():
+    # Setup folders
+    for split in ['train', 'val']:
+        (BASE_DIR / 'images' / split).mkdir(parents=True, exist_ok=True)
+        (BASE_DIR / 'labels' / split).mkdir(parents=True, exist_ok=True)
 
-# Create data.yaml
-yaml_content = f"""path: {base_path.absolute()}
-train: images/train
-val: images/val
+    # Connect to HF stream
+    print("📡 Connecting to Hugging Face Stream...")
+    train_stream = load_dataset("gabraken/mtg-detection", split="train", streaming=True).take(TRAIN_COUNT)
+    val_stream = load_dataset("gabraken/mtg-detection", split="test", streaming=True).take(VAL_COUNT)
 
-nc: 1
-names: ['card']
-"""
+    process_split(train_stream, 'train')
+    process_split(val_stream, 'val')
 
-yaml_path = base_path / 'data.yaml'
-with open(yaml_path, 'w') as f:
-    f.write(yaml_content)
+    # Create YAML
+    yaml_content = f"path: {BASE_DIR.absolute()}\ntrain: images/train\nval: images/val\nnc: 1\nnames: ['card']"
+    with open(BASE_DIR / "data.yaml", "w") as f:
+        f.write(yaml_content)
 
-print("\n" + "="*60)
-print("✅ Conversion complete!")
-print(f"📁 Dataset location: {base_path.absolute()}")
-print(f"📄 Config file: {yaml_path.absolute()}")
-print("\n🚀 To train YOLOv8:")
-print(f"   yolo detect train data={yaml_path} model=yolov8n.pt epochs=50 imgsz=1024 batch=8")
-print("="*60)
+    print("\n✅ Dataset conversion complete at native resolution.")
+
+if __name__ == "__main__":
+    main()
