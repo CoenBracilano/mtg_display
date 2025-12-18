@@ -208,6 +208,9 @@ __marimo__/
 
 # MTG card database for testing/training
 card_database/
+yolo_training/mtg_yolo/
+yolo_training/runs/
+
 
 # Detected cards output folder (for debugging)
 detected_cards/
