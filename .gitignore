@@ -228,3 +228,12 @@ yolo_training/model_weights.zip
 
 # Detected cards output folder (for debugging)
 detected_cards/
+
+# MAC OS system files
+.DS_store
+
+# Video files too big for repo
+*.mp4
+
+# Default YOLO model weights
+*yolo11*.pt

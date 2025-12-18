@@ -1,3 +1,4 @@
+from pathlib import Path
 import cv2
 import base64
 import numpy as np
@@ -15,10 +16,15 @@ from yolo_detection import YOLOCardDetector
 from trackers.tracker import IDTracker
 from trackers.tracker_deepsort import DeepSORTTracker
 from trackers.tracker_bytetrack import ByteTrackTracker
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+FRONTEND_DIR = BASE_DIR.parent / "frontend"
+INDEX_FILE = FRONTEND_DIR / "index.html"
 
 # 1. Global detector
 # detector = CardDetector()
-detector = YOLOCardDetector(model_path="../yolo_training/mtg_train_gpu_9928171/weights/best.pt", conf_threshold=0.3)
+detector = YOLOCardDetector(model_path="../yolo_training/model_weights/9928394_best.pt", conf_threshold=0.3)
 
 # 2. Use a dictionary or a class to hold the tracker instance globally
 # This ensures it's accessible across the async functions
@@ -89,9 +95,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.get("/")
 async def get_index():
-    return FileResponse("../frontend/index.html")
+    return FileResponse(INDEX_FILE)
 
-app.mount("/", StaticFiles(directory="../frontend/"), name="static")
+app.mount("/", StaticFiles(directory=FRONTEND_DIR), name="static")
 
 def get_tracker(tracker_type):
     if tracker_type == "deepsort":
