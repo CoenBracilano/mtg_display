@@ -6,8 +6,8 @@ from pathlib import Path
 from datasets import load_dataset
 
 # --- CONFIGURATION ---
-TRAIN_COUNT = 5000
-VAL_COUNT = 1500
+TRAIN_COUNT = 10000
+VAL_COUNT = 3000
 BASE_DIR = Path("mtg_yolo")
 
 def group_corners_by_card(annotations):

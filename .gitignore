@@ -210,9 +210,21 @@ __marimo__/
 card_database/
 
 # YOLO training stuff
+# yolo_training/*
+# !yolo_training/mtg_train_gpu_*/
+# yolo_training/mtg_train_gpu_*/*
+# !yolo_training/mtg_train_gpu_*/weights/
+# yolo_training/mtg_train_gpu_*/weights/*
+# !yolo_training/mtg_train_gpu_*/weights/best.pt
+
 yolo_training/mtg_yolo/
 yolo_training/runs/
+yolo_training/model_weights/
 yolo_training/mtg_train_gpu_*/
+yolo_training/model_weights.zip
+
+
+!models/**/weights/best.pt
 
 # Detected cards output folder (for debugging)
 detected_cards/
