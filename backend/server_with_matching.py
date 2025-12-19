@@ -19,11 +19,19 @@ from trackers.tracker_deepsort import DeepSORTTracker
 from trackers.tracker_bytetrack import ByteTrackTracker
 from card_matching import CardMatcher
 
+from huggingface_hub import hf_hub_download
+
 # --- CONFIGURATION & STATE ---
+model_path = hf_hub_download(
+    repo_id="vicpagan/mtg_card_detector",
+    filename="yolo11s_mtg_card_detector_model.pt"
+)
+
 detector = YOLOCardDetector(
-    model_path="../yolo_training/model_weights/9928394_best.pt", 
+    model_path=model_path,
     conf_threshold=0.3
 )
+
 matcher = CardMatcher(db_path="../card_database")
 executor = ThreadPoolExecutor(max_workers=4) # Increased for retries
 
